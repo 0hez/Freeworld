@@ -114,15 +114,19 @@ async function start(){
       const root=(await parseP(await fetchBuf(m.parts))).scene;root.updateMatrixWorld(true);
       const cr=m.crop,wr=new THREE.Group();
       root.traverse(o=>{if(o.isMesh){const q=new THREE.Box3().setFromObject(o),c=(q.min.x+q.max.x)/2;if(c<cr[0]||c>cr[1])o.visible=false}});
-      wr.add(root);wr.scale.setScalar(SC);wr.position.set(x0-cr[0]*SC,-m.floor*SC,(m.dz||0)*SC);
+      wr.add(root);
+      if(m.ground){const g=m.ground,tx=new THREE.TextureLoader().load(g.img);tx.encoding=THREE.sRGBEncoding;tx.anisotropy=8;
+        const tl=new THREE.Mesh(new THREE.PlaneGeometry(g.x[1]-g.x[0],g.z[1]-g.z[0]),new THREE.MeshBasicMaterial({map:tx,polygonOffset:true,polygonOffsetFactor:4,polygonOffsetUnits:8}));
+        tl.rotation.x=-Math.PI/2;tl.position.set((g.x[0]+g.x[1])/2,m.floor+(m.ty||0),(g.z[0]+g.z[1])/2);wr.add(tl)}
+      wr.scale.setScalar(SC);wr.position.set(x0-cr[0]*SC,-m.floor*SC,(m.dz||0)*SC);
       S.add(wr);wr.updateMatrixWorld(true);x0+=(cr[1]-cr[0])*SC;
       wr.traverse(o=>{if(o.isMesh&&o.visible){(Array.isArray(o.material)?o.material:[o.material]).forEach(q=>{if(q&&q.metalness>.3)q.metalness=.1});o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
     }
     box=new THREE.Box3();meshes.forEach(o=>box.union(o.userData.b));
     ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=SC*.18;
-    S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);cam.near=H*.1;cam.far=ext*4;cam.updateProjectionMatrix();
+    S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);cam.near=H*.25;cam.far=ext*4;cam.updateProjectionMatrix();
     const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshBasicMaterial({color:0x23272d}));
-    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-.05,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
+    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-.15,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
     pl.userData.b=new THREE.Box3().setFromObject(pl);
     setSize();spawn();meshes.push(pl);$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
   }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
