@@ -184,8 +184,8 @@ function buildEnv(){
   S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);
   const cx=(box.min.x+box.max.x)/2,cz=(box.min.z+box.max.z)/2,hx=(box.max.x-box.min.x)/2,hz=(box.max.z-box.min.z)/2;
   // original dark floor under everything (unchanged)
-  const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshBasicMaterial({color:0x23272d}));
-  pl.rotation.x=-Math.PI/2;pl.position.set(cx,-1.5,cz);S.add(pl);pl.updateMatrixWorld(true);pl.userData.b=new THREE.Box3().setFromObject(pl);PLN=pl;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshLambertMaterial({color:new THREE.Color(.33,.4,.28),polygonOffset:true,polygonOffsetFactor:4,polygonOffsetUnits:8}));
+  pl.rotation.x=-Math.PI/2;pl.position.set(cx,-.3,cz);S.add(pl);pl.updateMatrixWorld(true);pl.userData.b=new THREE.Box3().setFromObject(pl);PLN=pl;
   buildGaps();
   // clouds
   const tx=[cloudTex(),cloudTex(),cloudTex()];cloudMats=tx.map(t=>new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,fog:false,opacity:.8}));
@@ -259,6 +259,122 @@ function env(dt){
   else snowP.visible=false;
 }
 
+// ---- NPC pedestrians: instanced low-poly people that wander the city like GTA peds ----
+let gapSet=new Set(),npcOn=false,npcCur=0;
+const NPCN=90,NPC=[],NM={},V3=new THREE.Vector3();
+const SKIN=[0xf3d2b3,0xe6b98f,0xd29a6e,0xb5774f,0x8a5636,0x5c3a26],HAIR=[0x16110e,0x2e2018,0x4a3220,0x7a5530,0xb98a4a,0x8e8e8e,0x3a1c14],
+  PANTS=[0x1e2a44,0x15171c,0x3d5a85,0x5b4a38,0x6a6d72,0x2d3b2d,0x7a1f2b],SHOE=[0x111111,0x222222,0xeeeeee,0x5a3a22];
+const pick=a=>a[Math.random()*a.length|0];
+const Mb=new THREE.Matrix4(),Mh=new THREE.Matrix4(),Ms=new THREE.Matrix4(),Mu=new THREE.Matrix4(),Mf=new THREE.Matrix4(),Mt=new THREE.Matrix4(),Mr=new THREE.Matrix4(),Mz=new THREE.Matrix4().makeScale(0,0,0);
+const mT=(m,x,y,z)=>m.multiply(Mt.makeTranslation(x,y,z)),mRX=(m,a)=>m.multiply(Mr.makeRotationX(a));
+function buildNPC(){
+  gapSet=new Set(gapMeshes);
+  const mk=(geo,cnt)=>{const m=new THREE.InstancedMesh(geo,new THREE.MeshLambertMaterial({color:0xffffff}),cnt);m.frustumCulled=false;m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);S.add(m);return m};
+  const tg=new THREE.CylinderGeometry(.2,.17,.55,10);tg.scale(1,1,.62);tg.translate(0,.275,0);
+  const hg=new THREE.SphereGeometry(.105,14,10);hg.scale(.92,1.12,1);
+  const hr=new THREE.SphereGeometry(.113,14,10,0,Math.PI*2,0,Math.PI*.58);hr.scale(.95,1.2,1.1);hr.rotateX(-.4);hr.translate(0,.01,-.01);
+  const ua=new THREE.CylinderGeometry(.05,.042,.3,8);ua.translate(0,-.15,0);
+  const fa=new THREE.CylinderGeometry(.042,.034,.28,8);fa.translate(0,-.14,0);
+  const hd=new THREE.SphereGeometry(.04,8,6);hd.scale(.9,1.2,.7);hd.translate(0,-.03,0);
+  const th=new THREE.CylinderGeometry(.08,.062,.46,8);th.translate(0,-.23,0);
+  const sh=new THREE.CylinderGeometry(.06,.045,.44,8);sh.translate(0,-.22,0);
+  const so=new THREE.BoxGeometry(.1,.07,.25);so.translate(0,-.035,.055);
+  NM.torso=mk(tg,NPCN);NM.head=mk(hg,NPCN);NM.hair=mk(hr,NPCN);NM.ua=mk(ua,NPCN*2);NM.fa=mk(fa,NPCN*2);NM.hand=mk(hd,NPCN*2);NM.th=mk(th,NPCN*2);NM.sh=mk(sh,NPCN*2);NM.shoe=mk(so,NPCN*2);
+  const col=new THREE.Color();
+  for(let i=0;i<NPCN;i++){
+    const skin=pick(SKIN),hair=pick(HAIR),shirt=new THREE.Color().setHSL(Math.random(),.25+.45*Math.random(),.22+.4*Math.random()),pants=pick(PANTS),shoe=pick(SHOE),sleeves=Math.random()<.45,shorts=Math.random()<.12;
+    NPC.push({i,x:0,y:-1000,z:0,face:0,tface:0,speed:0,tspd:0,state:'spawn',act:0,t:0,phase:Math.random()*6.28,tgtY:0,blocked:false,stuck:0,moved:0,zeroed:false,
+      s:.9+Math.random()*.17,w:.92+Math.random()*.2,hl:Math.random()<.45?1.3:1});
+    NM.torso.setColorAt(i,shirt);NM.head.setColorAt(i,col.setHex(skin));NM.hair.setColorAt(i,col.setHex(hair));
+    for(let k=0;k<2;k++){const j=2*i+k;NM.ua.setColorAt(j,shirt);NM.fa.setColorAt(j,sleeves?shirt:col.setHex(skin));NM.hand.setColorAt(j,col.setHex(skin));
+      NM.th.setColorAt(j,col.setHex(pants));NM.sh.setColorAt(j,shorts?col.setHex(skin):col.setHex(pants));NM.shoe.setColorAt(j,col.setHex(shoe))}
+  }
+  for(const k in NM)NM[k].instanceColor.needsUpdate=true;
+  npcOn=true;
+}
+function npcZero(n){const i=n.i;NM.torso.setMatrixAt(i,Mz);NM.head.setMatrixAt(i,Mz);NM.hair.setMatrixAt(i,Mz);
+  for(let k=0;k<2;k++){const j=2*i+k;NM.ua.setMatrixAt(j,Mz);NM.fa.setMatrixAt(j,Mz);NM.hand.setMatrixAt(j,Mz);NM.th.setMatrixAt(j,Mz);NM.sh.setMatrixAt(j,Mz);NM.shoe.setMatrixAt(j,Mz)}}
+function npcSpawn(n){
+  const x=box.min.x+Math.random()*(box.max.x-box.min.x),z=box.min.z+Math.random()*(box.max.z-box.min.z);
+  const h=hits(x,z,box.max.y+1,box.max.y-box.min.y+2);
+  if(!h.length)return;const q=h[0];
+  if(q.object===PLN||gapSet.has(q.object))return;          // only real city surfaces, open to the sky
+  const y=q.point.y;if(y<-1||y>1.8)return;
+  n.x=x;n.z=z;n.y=y;n.tgtY=y;n.state='walk';n.t=0;n.face=n.tface=Math.random()*6.28;n.zeroed=false;n.stuck=0;n.blocked=false;n.speed=0;
+}
+function npcCheck(n){
+  const L=n.speed*1.0+.7,nx=n.x+Math.sin(n.face)*L,nz=n.z+Math.cos(n.face)*L,h=hits(nx,nz,n.y+1.6,5.4);
+  if(!h.length){n.blocked=true;return}
+  const q=h[0];
+  if(q.object===PLN||gapSet.has(q.object)||q.point.y-n.y>.7||n.y-q.point.y>2){n.blocked=true;return}
+  n.tgtY=q.point.y;
+}
+function npcPick(n){
+  const r=Math.random();n.act=0;n.state='walk';
+  if(r<.58){n.tspd=1.15+Math.random()*.5;n.tface=n.face+(Math.random()-.5)*1.1;n.t=6+Math.random()*10}
+  else if(r<.74){n.state='idle';n.tspd=0;n.t=3+Math.random()*6;n.act=Math.random()<.5?1:0}
+  else if(r<.84){n.tspd=3.1+Math.random()*.9;n.tface=n.face+(Math.random()-.5)*.8;n.t=4+Math.random()*6}
+  else{n.tspd=1.0;n.act=1;n.tface=n.face+(Math.random()-.5);n.t=5+Math.random()*8}
+}
+function npcAnim(n,dt,tt){
+  const i=n.i,sp=n.speed,mv=sp>.1?1:0;
+  n.phase+=dt*sp*4.5;
+  const amp=Math.min(.95,.1+.3*sp)*mv,kb=(.15+.16*sp)*mv,lean=Math.min(.32,sp*.07),bob=mv*Math.abs(Math.cos(n.phase))*.03*Math.min(1,sp);
+  Mb.makeRotationY(n.face).scale(V3.set(n.w*n.s,n.s,n.w*n.s)).setPosition(n.x,n.y,n.z);
+  Mh.copy(Mb);mT(Mh,0,.97+bob,0);mRX(Mh,lean);
+  NM.torso.setMatrixAt(i,Mh);
+  Ms.copy(Mh);mT(Ms,0,.7,0);NM.head.setMatrixAt(i,Ms);Ms.scale(V3.set(1,n.hl,1));NM.hair.setMatrixAt(i,Ms);
+  for(let k=0;k<2;k++){
+    const sd=k?1:-1,pp=n.phase+(k?0:Math.PI),sw=Math.sin(pp),j=2*i+k;
+    let aR=amp*.85*sw,eB=.12+.1*sp*(sp>2?2:1);
+    if(n.state==='panic')eB=Math.max(eB,1);
+    if(n.act===1&&k===1){aR=-.9;eB=1.5}
+    else if(n.act===2){aR=-.55-.35*Math.sin(tt*3.1+n.i*1.7+k*2);eB=.9+.4*Math.sin(tt*4.3+n.i+k)}
+    else if(!mv){aR=.04*Math.sin(tt*1.3+n.i);eB=.15}
+    Mu.copy(Mh);mT(Mu,sd*.22,.48,0);mRX(Mu,aR);NM.ua.setMatrixAt(j,Mu);
+    Mf.copy(Mu);mT(Mf,0,-.3,0);mRX(Mf,-eB);NM.fa.setMatrixAt(j,Mf);mT(Mf,0,-.28,0);NM.hand.setMatrixAt(j,Mf);
+    Mu.copy(Mb);mT(Mu,sd*.1,.97,0);mRX(Mu,-amp*sw);NM.th.setMatrixAt(j,Mu);
+    Mf.copy(Mu);mT(Mf,0,-.46,0);mRX(Mf,kb*Math.max(0,Math.cos(pp)));NM.sh.setMatrixAt(j,Mf);mT(Mf,0,-.44,0);NM.shoe.setMatrixAt(j,Mf);
+  }
+}
+function npcUpdate(dt){
+  if(!npcOn)return;
+  const tt=performance.now()/1000,t0=performance.now();
+  // time-sliced ground / obstacle checks so the phone never stutters
+  let ops=0;
+  while(ops<14&&(ops<1||performance.now()-t0<3)){
+    const n=NPC[npcCur];npcCur=(npcCur+1)%NPCN;ops++;
+    if(n.state==='spawn')npcSpawn(n);else if(n.tspd>.05&&!n.blocked)npcCheck(n);
+  }
+  for(const n of NPC){
+    if(n.state==='spawn'){if(!n.zeroed){npcZero(n);n.zeroed=true}continue}
+    n.t-=dt;
+    const dx=pos.x-n.x,dz=pos.z-n.z,d2=dx*dx+dz*dz;
+    if(n.state!=='panic'&&d2<64){
+      const scared=(!fly&&spd>2.6&&d2<36)||(fly&&Math.abs(pos.y-n.y)<15&&fv.lengthSq()>9);
+      if(scared){n.state='panic';n.act=0;n.tspd=4.2;n.tface=Math.atan2(-dx,-dz)+(Math.random()-.5)*.6;n.t=3+Math.random()*2.5}
+      else if(n.state==='idle'&&n.act!==2)n.tface=Math.atan2(dx,dz);
+    }
+    if(n.t<=0)npcPick(n);
+    let d=n.tface-n.face;d=Math.atan2(Math.sin(d),Math.cos(d));n.face+=d*Math.min(1,dt*(n.state==='panic'?10:3.5));
+    n.speed+=(n.tspd-n.speed)*Math.min(1,dt*3);
+    if(n.blocked){n.speed=0;n.tface=n.face+(Math.random()<.5?1:-1)*(1.2+Math.random()*.9);n.blocked=false;n.stuck++;n.moved=0;
+      if(n.stuck>10){n.state='spawn';n.zeroed=false;continue}}
+    else if(n.speed>.05){n.x+=Math.sin(n.face)*n.speed*dt;n.z+=Math.cos(n.face)*n.speed*dt;n.moved+=dt;if(n.moved>3)n.stuck=0}
+    n.y+=(n.tgtY-n.y)*Math.min(1,dt*10);
+  }
+  // keep people from overlapping, and let walkers stop to chat
+  for(let a=0;a<NPCN;a++){const A=NPC[a];if(A.state==='spawn')continue;
+    for(let b=a+1;b<NPCN;b++){const B=NPC[b];if(B.state==='spawn')continue;
+      const dx=B.x-A.x,dz=B.z-A.z,d2=dx*dx+dz*dz;if(d2>1.7)continue;const d=Math.sqrt(d2)||.01;
+      if(d<.55){const p=(.55-d)*.5/d;A.x-=dx*p;A.z-=dz*p;B.x+=dx*p;B.z+=dz*p}
+      if(d<1.3&&A.act!==2&&B.act!==2&&A.state!=='panic'&&B.state!=='panic'&&Math.random()<.01){
+        A.state=B.state='idle';A.act=B.act=2;A.tspd=B.tspd=0;A.t=B.t=5+Math.random()*8;A.tface=Math.atan2(dx,dz);B.tface=Math.atan2(-dx,-dz)}
+    }}
+  for(const n of NPC)if(n.state!=='spawn')npcAnim(n,dt,tt);
+  for(const k in NM)NM[k].instanceMatrix.needsUpdate=true;
+}
+
 // ---- character + world ----
 function setSize(){rig.scale.setScalar(H/1.83)}
 const parseP=buf=>new Promise((ok,no)=>loader.parse(buf,'',ok,no));
@@ -296,7 +412,7 @@ async function start(){
     ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=SC*.18;
     cam.near=H*.25;cam.far=ext*5;cam.updateProjectionMatrix();
     buildEnv();
-    setSize();spawn();meshes.push(PLN,...gapMeshes);$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
+    setSize();spawn();meshes.push(PLN,...gapMeshes);buildNPC();$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
   }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
 }
 // ---- input ----
@@ -374,6 +490,7 @@ function loop(){
   const dist=H*3.4,cp=Math.cos(camPitch),fo=fly?H*.5:H*.9;
   cam.position.set(pos.x+Math.sin(camYaw)*cp*dist,Math.max(pos.y+H*.35,pos.y+fo+Math.sin(camPitch)*dist),pos.z+Math.cos(camYaw)*cp*dist);
   cam.lookAt(pos.x,pos.y+fo,pos.z);
+  npcUpdate(dt);
   env(dt);
   R.render(S,cam);
 }
