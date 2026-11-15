@@ -16,7 +16,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 </style></head><body>
 <canvas id="c"></canvas>
 <div id="ld"><div><h2>City Walk</h2><p id="msg">Loading character…</p>
-<label class="btn" id="pk" hidden>Choose city_lite.glb<input id="fi" type="file" hidden></label></div></div>
+</div></div>
 <div id="bar" hidden><button id="run">Walk</button><button id="sm">−</button><button id="bg">+</button></div>
 <div id="sb"><div id="kn"></div></div><div id="st" hidden>Left: move · Right: look</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -90,36 +90,38 @@ function spawn(){
   pos.set(cx,box.min.y,cz);gy=pos.y;
 }
 
-// ---- character ----
-function setSize(){holder.scale.setScalar(1);rig.scale.setScalar(H/1.83)}
-function loadChar(){
-  fetch('mai_lite.glb').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(buf=>loader.parse(buf,'',g=>{
+// ---- character + world ----
+function setSize(){rig.scale.setScalar(H/1.83)}
+const parseP=buf=>new Promise((ok,no)=>loader.parse(buf,'',ok,no));
+async function fetchBuf(parts){
+  const a=await Promise.all(parts.map(u=>fetch(u).then(r=>r.ok?r.arrayBuffer():Promise.reject(new Error(u+' not found')))));
+  let n=0;a.forEach(x=>n+=x.byteLength);const o=new Uint8Array(n);let p=0;a.forEach(x=>{o.set(new Uint8Array(x),p);p+=x.byteLength});return o.buffer;
+}
+async function start(){
+  try{
+    $('msg').textContent='Loading character…';
+    const g=await parseP(await fetchBuf(['mai_lite.glb']));
     holder=new THREE.Group();rig=new THREE.Group();rig.add(g.scene);g.scene.position.y=1;
     g.scene.traverse(o=>{if(!o.isMesh)return;const mt=o.material,nm=mt.name;
-      mt.normalMap=null;mt.side=THREE.DoubleSide;mt.needsUpdate=true;
-      o.geometry=o.geometry.clone();
+      mt.normalMap=null;mt.side=THREE.DoubleSide;mt.needsUpdate=true;o.geometry=o.geometry.clone();
       prep(o,nm.startsWith('uppr')?'body':nm.startsWith('lowr')?'hand':nm.startsWith('hair')?'hair':'head');
       if(o.userData.type!=='head')parts.push(o)});
     holder.add(rig);S.add(holder);
-    $('msg').textContent='Loading city… (about 28 MB)';
-    Promise.all(['city_part1.bin','city_part2.bin'].map(u=>fetch(u).then(r=>r.ok?r.arrayBuffer():Promise.reject()))).then(a=>{
-      const o=new Uint8Array(a[0].byteLength+a[1].byteLength);o.set(new Uint8Array(a[0]),0);o.set(new Uint8Array(a[1]),a[0].byteLength);loadCity(o.buffer)
-    }).catch(()=>{$('msg').textContent='City parts not found next to index.html. Pick city_lite.glb manually:';$('pk').hidden=false});
-  },e=>$('msg').textContent='Character failed: '+e.message)).catch(()=>$('msg').textContent='Could not load mai_lite.glb — upload it next to index.html.');
-}
-$('fi').onchange=e=>{const f=e.target.files[0];if(!f)return;$('msg').textContent='Reading city… (can take a few seconds)';
-  $('pk').hidden=true;const fr=new FileReader();fr.onload=()=>loadCity(fr.result);fr.readAsArrayBuffer(f)};
-function loadCity(buf){
-  loader.parse(buf,'',g=>{
-    S.add(g.scene);g.scene.updateMatrixWorld(true);
-    box=new THREE.Box3().setFromObject(g.scene);const sz=box.getSize(new THREE.Vector3());
-    ext=Math.max(sz.x,sz.z);H=ext*.0045;
-    g.scene.traverse(o=>{if(o.isMesh){o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
-    S.fog=new THREE.Fog(0xa9c7e8,ext*.6,ext*3);cam.near=H*.1;cam.far=ext*5;cam.updateProjectionMatrix();
+    const W=await (await fetch('world.json')).json(),TILE=100;let x0=0;
+    for(const m of W.maps){
+      $('msg').textContent='Loading '+m.name+'…';
+      const root=(await parseP(await fetchBuf(m.parts))).scene;root.updateMatrixWorld(true);
+      const b=new THREE.Box3().setFromObject(root),s=TILE/(b.max.x-b.min.x),wr=new THREE.Group();
+      wr.add(root);wr.scale.setScalar(s);wr.position.set(x0-b.min.x*s,-b.min.y*s,-(b.min.z+b.max.z)/2*s);
+      S.add(wr);wr.updateMatrixWorld(true);x0+=TILE;
+      wr.traverse(o=>{if(o.isMesh){o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
+    }
+    box=new THREE.Box3();meshes.forEach(o=>box.union(o.userData.b));
+    ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=TILE*.0045;
+    S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);cam.near=H*.1;cam.far=ext*4;cam.updateProjectionMatrix();
     setSize();spawn();$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
-  },e=>{$('msg').textContent='City failed: '+e.message;$('pk').hidden=false});
+  }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
 }
-
 // ---- input ----
 let sx=0,sy=0,sid=null,so=null,lid=null,lx=0,ly=0;
 const cv=$('c');
@@ -175,5 +177,5 @@ function loop(){
   cam.lookAt(pos.x,pos.y+H*.9,pos.z);
   R.render(S,cam);
 }
-loadChar();
+start();
 </script></body></html>
