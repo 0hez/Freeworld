@@ -18,7 +18,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 <canvas id="c"></canvas>
 <div id="ld"><div><h2>City Walk</h2><p id="msg">Loading character…</p>
 </div></div>
-<div id="bar" hidden><button id="fly">Fly</button><button id="run">Walk</button><button id="sm">−</button><button id="bg">+</button><button id="tm">Day</button><button id="wx">Clear</button></div>
+<div id="bar" hidden><button id="fly">Fly</button><button id="run">Walk</button><button id="sm">−</button><button id="bg">+</button><button id="tm">Day</button><button id="wx">Clear</button><button id="pcar" hidden>Porsche</button><button id="lcar" hidden>Lambo</button></div>
 <div id="vb" hidden><button id="upb">▲</button><button id="dnb">▼</button></div><div id="sb"><div id="kn"></div></div><div id="st" hidden>Left: move · Right: look</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -181,6 +181,7 @@ function buildGaps(){
   }
 }
 function buildEnv(){
+  fillHoles();
   S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);
   const cx=(box.min.x+box.max.x)/2,cz=(box.min.z+box.max.z)/2,hx=(box.max.x-box.min.x)/2,hz=(box.max.z-box.min.z)/2;
   // original dark floor under everything (unchanged)
@@ -233,6 +234,7 @@ function env(dt){
   hemi.intensity=(.3+.8*lk)*(1-.35*ov)+flash*1.5;
   if(el>-3){const bl=sm(15,40,el);sun.position.set(.4,1,.3).normalize().multiplyScalar(100*bl).addScaledVector(sdir,100*(1-bl));sun.color.copy(skyU.sunCol.value).lerp(white,sm(10,30,el));sun.intensity=.9*sm(-2,10,el)*(1-.85*ov)}
   else{sun.position.copy(sdir).multiplyScalar(-100);sun.color.setHex(0x7f99ff);sun.intensity=.35*sm(-3,-10,el)*(1-.6*ov)}
+  if(FILL)FILL.material.color.setScalar(clamp((hemi.intensity+sun.intensity*.5)/FILLREF,.1,1.1));
   // clouds
   const k=(.3+.7*lk)*(1-.6*wc.dark),n=Math.round(clouds.length*clamp(wc.cloud,0,1)),R2=ext*1.5;
   cc.setRGB(k,k,k).lerp(hor,.3);cloudMats.forEach(m=>{m.color.copy(cc);m.opacity=.55+.4*ov});
@@ -412,7 +414,7 @@ async function start(){
     ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=SC*.18;
     cam.near=H*.25;cam.far=ext*5;cam.updateProjectionMatrix();
     buildEnv();
-    setSize();spawn();meshes.push(PLN,...gapMeshes);buildNPC();$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
+    setSize();spawn();meshes.push(PLN,...gapMeshes);buildNPC();$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();loadCars();
   }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
 }
 // ---- input ----
@@ -445,6 +447,7 @@ let last=0;
 function loop(){
   requestAnimationFrame(loop);
   const now=performance.now(),dt=Math.min(.05,(now-last)/1000);last=now;
+  if(drv){driveLoop(dt);return}
   const mag=Math.min(1,Math.hypot(sx,sy)),sY=Math.sin(camYaw),cY=Math.cos(camYaw);let tv=0;
   tickT-=dt;const tk=tickT<=0;if(tk)tickT=.06;
   let v=0,rb=0,mb=0,lean=0,flyMove=0;
@@ -493,6 +496,230 @@ function loop(){
   npcUpdate(dt);
   env(dt);
   R.render(S,cam);
+}
+
+// ================= FIX: grey gaps between / inside the map models =================
+// Renders a top-down slice of the street-level map geometry, finds every spot the models do not cover,
+// and extends the map's own ground colours into those spots with a ground sheet (walkable, driveable).
+let FILL=null,FILLREF=1.55;
+function fillHoles(){
+  try{
+    const x0=box.min.x,z0=box.min.z,W0=box.max.x-x0,D0=box.max.z-z0,k=1536/Math.max(W0,D0);
+    const W=Math.max(16,Math.ceil(W0*k)),Dn=Math.max(16,Math.ceil(D0*k));
+    const rt=new THREE.WebGLRenderTarget(W,Dn,{format:THREE.RGBAFormat,minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter});
+    rt.texture.encoding=THREE.sRGBEncoding;
+    const oc=new THREE.OrthographicCamera(-W0/2,W0/2,D0/2,-D0/2,0,16),cx=x0+W0/2,cz=z0+D0/2;
+    oc.position.set(cx,4,cz);oc.up.set(0,0,-1);oc.lookAt(cx,0,cz);oc.updateMatrixWorld(true);
+    const sv=[sky.visible,stars.visible,holder.visible];sky.visible=stars.visible=holder.visible=false;
+    const oldC=R.getClearColor(new THREE.Color()),oldA=R.getClearAlpha();
+    R.setRenderTarget(rt);R.setClearColor(0x000000,0);R.render(S,oc);
+    const buf=new Uint8Array(W*Dn*4);R.readRenderTargetPixels(rt,0,0,W,Dn,buf);
+    R.setRenderTarget(null);R.setClearColor(oldC,oldA);
+    sky.visible=sv[0];stars.visible=sv[1];holder.visible=sv[2];rt.dispose();
+    const N=W*Dn,cov=new Uint8Array(N);let sr=0,sg=0,sb=0,cn=0;
+    for(let i=0;i<N;i++)if(buf[4*i+3]>40){cov[i]=1;sr+=buf[4*i];sg+=buf[4*i+1];sb+=buf[4*i+2];cn++}
+    if(cn===N)return;
+    const mr=cn?sr/cn:70,mg=cn?sg/cn:74,mb=cn?sb/cn:80;
+    // grow the map's ground colours outward into the holes (breadth-first), fading to the map's average pavement colour
+    const src=new Int32Array(N).fill(-1),dist=new Uint16Array(N),q=new Int32Array(N);let qh=0,qt=0;
+    for(let y=0;y<Dn;y++)for(let x=0;x<W;x++){const i=y*W+x;if(!cov[i])continue;
+      if((x>0&&!cov[i-1])||(x<W-1&&!cov[i+1])||(y>0&&!cov[i-W])||(y<Dn-1&&!cov[i+W])){src[i]=i;q[qt++]=i}}
+    while(qh<qt){const i=q[qh++],x=i%W,d=dist[i]+1,s=src[i];
+      if(x>0&&!cov[i-1]&&src[i-1]<0){src[i-1]=s;dist[i-1]=d;q[qt++]=i-1}
+      if(x<W-1&&!cov[i+1]&&src[i+1]<0){src[i+1]=s;dist[i+1]=d;q[qt++]=i+1}
+      if(i>=W&&!cov[i-W]&&src[i-W]<0){src[i-W]=s;dist[i-W]=d;q[qt++]=i-W}
+      if(i<N-W&&!cov[i+W]&&src[i+W]<0){src[i+W]=s;dist[i+W]=d;q[qt++]=i+W}}
+    const out=new Uint8Array(N*4),fade=60*k;
+    for(let i=0;i<N;i++){const j=4*i;
+      if(cov[i]){out[j]=buf[j];out[j+1]=buf[j+1];out[j+2]=buf[j+2];out[j+3]=0;continue}
+      let r=mr,g=mg,b=mb;const s=src[i];
+      if(s>=0){const t=Math.min(1,dist[i]/fade),w=.45*(1-t*t);r=mr*(1-w)+buf[4*s]*w;g=mg*(1-w)+buf[4*s+1]*w;b=mb*(1-w)+buf[4*s+2]*w}
+      const nz=(((Math.imul(i,2654435761)>>>0)%997)/997-.5)*10;
+      out[j]=clamp(r*.92+nz,0,255);out[j+1]=clamp(g*.92+nz,0,255);out[j+2]=clamp(b*.92+nz,0,255);out[j+3]=255}
+    const tx=new THREE.DataTexture(out,W,Dn,THREE.RGBAFormat,THREE.UnsignedByteType);
+    tx.magFilter=tx.minFilter=THREE.LinearFilter;tx.generateMipmaps=false;tx.encoding=THREE.sRGBEncoding;tx.needsUpdate=true;
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(W0,D0),new THREE.MeshBasicMaterial({map:tx,alphaTest:.5,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:3,polygonOffsetUnits:6}));
+    m.rotation.x=-Math.PI/2;m.position.set(cx,-.05,cz);S.add(m);m.updateMatrixWorld(true);
+    // only the filled spots are solid; spots the map already covers keep using the map's own surfaces
+    m.raycast=function(r,hs){const t=[];THREE.Mesh.prototype.raycast.call(this,r,t);
+      for(const h of t){if(!h.uv)continue;const u=clamp(Math.floor(h.uv.x*W),0,W-1),v=clamp(Math.floor(h.uv.y*Dn),0,Dn-1);if(out[4*(v*W+u)+3]>0)hs.push(h)}};
+    m.userData.b=new THREE.Box3().setFromObject(m);gapMeshes.push(m);FILL=m;FILLREF=hemi.intensity+sun.intensity*.5;
+  }catch(e){console.warn('gap fill failed',e)}
+}
+
+// ================= NEW: drivable cars (Porsche Carrera GT + Lamborghini Aventador SVJ) =================
+let drv=null,carEnvTex=null,carTick=0,hudT=0,camHold=0;
+const CARS={},hv=new THREE.Vector3(),hn=new THREE.Vector3();
+const CARDEF=[
+  {id:'porsche',btn:'pcar',name:'Porsche',file:'porsche_carrera_gt_concept_2000_replica.glb',len:4.61,max:52,acc:20,brk:42,tex:1024,build:buildPorsche},
+  {id:'lambo',btn:'lcar',name:'Lambo',file:'lamborghini_aventador_svj_sdc__free.glb',len:4.94,max:56,acc:23,brk:46,tex:2048,build:buildLambo}
+];
+function shrinkTex(t,mx){const im=t&&t.image;if(!im||!im.width||(im.width<=mx&&im.height<=mx))return;
+  const k=mx/Math.max(im.width,im.height),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*k));c.height=Math.max(1,Math.round(im.height*k));
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);t.image=c;t.needsUpdate=true}
+function carEnvMap(){
+  const sc=new THREE.Scene(),g=new THREE.SphereGeometry(50,24,12),n=g.attributes.position.count,col=new Float32Array(n*3),
+    c1=new THREE.Color(0x8fb4e8),c2=new THREE.Color(0xdfe6ee),c3=new THREE.Color(0x4a4f56),t=new THREE.Color();
+  for(let i=0;i<n;i++){const y=g.attributes.position.getY(i)/50;if(y>0)t.copy(c2).lerp(c1,Math.pow(y,.6));else t.copy(c2).lerp(c3,Math.min(1,-y*2.5));col.set([t.r,t.g,t.b],3*i)}
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  sc.add(new THREE.Mesh(g,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.BackSide})));
+  const pm=new THREE.PMREMGenerator(R),rt=pm.fromScene(sc,0,.1,200);pm.dispose();return rt.texture;
+}
+function takeTris(g,list){const o=new THREE.BufferGeometry();
+  for(const k in g.attributes){const a=g.attributes[k],s=a.itemSize,arr=new a.array.constructor(list.length*3*s);
+    list.forEach((t,i)=>{for(let v=0;v<3;v++)for(let c=0;c<s;c++)arr[(i*3+v)*s+c]=a.array[(t*3+v)*s+c]});
+    o.setAttribute(k,new THREE.BufferAttribute(arr,s,a.normalized))}
+  return o}
+// The Porsche file holds TWO cars side by side, parked at an angle: keep one, straighten it, and give it real spinning/steering wheels.
+function buildPorsche(scene){
+  scene.updateMatrixWorld(true);
+  const AF=[[.70,-1.26],[-.56,-2.56]],AR=[[-2.63,-.51],[-1.43,.74]],AC=[-.98,-.93],BC=[.745,1.32],WY=.357,WC=[AF[0],AF[1],AR[0],AR[1]];
+  const mx=(AC[0]+BC[0])/2,mz=(AC[1]+BC[1])/2,nx=BC[0]-AC[0],nz=BC[1]-AC[1];
+  const fmx=(AF[0][0]+AF[1][0])/2,fmz=(AF[0][1]+AF[1][1])/2,rmx=(AR[0][0]+AR[1][0])/2,rmz=(AR[0][1]+AR[1][1])/2;
+  const th=Math.atan2(-(fmx-rmx),fmz-rmz),cx=(fmx+rmx)/2,cz=(fmz+rmz)/2,co=Math.cos(th),si=Math.sin(th),isW=/^(tire|tireside|rim\d|rimemblem|brakedisc)$/i;
+  const root=new THREE.Group(),wheels=[];
+  const wl=WC.map(w=>{const dx=w[0]-cx,dz=w[1]-cz;return new THREE.Vector3(dx*co+dz*si,WY,-dx*si+dz*co)});
+  WC.forEach((w,i)=>{const st=new THREE.Group(),sp=new THREE.Group();st.position.copy(wl[i]);st.add(sp);root.add(st);wheels.push({steer:st,spin:sp,front:i<2,r:.364})});
+  scene.traverse(o=>{
+    if(!o.isMesh)return;const mt=o.material,nm=mt.name||'';if(/^(floor|carshadow)$/i.test(nm))return;
+    const g0=o.geometry.clone();g0.applyMatrix4(o.matrixWorld);const g=g0.index?g0.toNonIndexed():g0,P=g.attributes.position.array,nT=P.length/9,lists=[[],[],[],[],[]],wh=isW.test(nm);
+    for(let t=0;t<nT;t++){const q=t*9,x=(P[q]+P[q+3]+P[q+6])/3,y=(P[q+1]+P[q+4]+P[q+7])/3,z=(P[q+2]+P[q+5]+P[q+8])/3;
+      if((x-mx)*nx+(z-mz)*nz>=0)continue;
+      let k=4;if(wh)for(let i=0;i<4;i++){const dx=x-WC[i][0],dz=z-WC[i][1],dy=y-WY;if(dx*dx+dz*dz+dy*dy<.2116){k=i;break}}
+      lists[k].push(t)}
+    lists.forEach((l,k)=>{if(!l.length)return;const ng=takeTris(g,l);ng.translate(-cx,0,-cz);ng.rotateY(th);
+      if(k<4)ng.translate(-wl[k].x,-WY,-wl[k].z);
+      (k<4?wheels[k].spin:root).add(new THREE.Mesh(ng,mt))});
+  });
+  return{root,wheels};
+}
+// The Lamborghini already faces +Z in metres; its wheels are separate parts, so re-pivot them to spin (and steer at the front).
+function buildLambo(scene){
+  scene.updateMatrixWorld(true);
+  const ws=[],br=[];scene.traverse(o=>{if(/^Wheel/.test(o.name))ws.push(o);else if(/^BrakeFr/.test(o.name))br.push(o)});
+  const wheels=[];
+  ws.forEach(o=>{const bb=new THREE.Box3().setFromObject(o),cen=bb.getCenter(new THREE.Vector3()),front=cen.z>0,pc=front?o.getWorldPosition(new THREE.Vector3()):cen;
+    if(front){o.rotation.set(0,pc.x>0?0:Math.PI,0);o.updateMatrixWorld(true)}
+    const st=new THREE.Group(),sp=new THREE.Group();st.position.copy(pc);st.add(sp);scene.add(st);st.updateMatrixWorld(true);sp.attach(o);
+    wheels.push({steer:st,spin:sp,front,r:(bb.max.y-bb.min.y)/2})});
+  br.forEach(o=>{const p=o.getWorldPosition(new THREE.Vector3());let b=null,bd=1e9;
+    wheels.forEach(w=>{if(!w.front)return;const d=w.steer.position.distanceTo(p);if(d<bd){bd=d;b=w}});
+    if(b){b.steer.updateMatrixWorld(true);b.steer.attach(o)}});
+  return{root:scene,wheels};
+}
+function makeCar(d,scene){
+  const{root,wheels}=d.build(scene);
+  root.traverse(o=>{if(!o.isMesh)return;(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+    ['map','normalMap','roughnessMap','metalnessMap','aoMap','emissiveMap','alphaMap'].forEach(k=>shrinkTex(m[k],d.tex));
+    if(carEnvTex&&m.isMeshStandardMaterial){m.envMap=carEnvTex;m.envMapIntensity=.9}
+    m.needsUpdate=true})});
+  const bb=new THREE.Box3().setFromObject(root),s=d.len/(bb.max.z-bb.min.z);
+  root.scale.setScalar(s);root.position.y=-bb.min.y*s;
+  const tilt=new THREE.Group(),obj=new THREE.Group();tilt.add(root);obj.add(tilt);obj.visible=false;
+  const fr=wheels.filter(w=>w.front),rr=wheels.filter(w=>!w.front),avg=(a,f)=>a.reduce((t,w)=>t+f(w),0)/Math.max(1,a.length);
+  return{d,obj,tilt,wheels,hl:Math.max(bb.max.z,-bb.min.z)*s,hw:Math.max(bb.max.x,-bb.min.x)*s,wb:(avg(fr,w=>w.steer.position.z)-avg(rr,w=>w.steer.position.z))*s,
+    wr:avg(wheels,w=>w.r)*s,max:d.max,acc:d.acc,brk:d.brk,x:0,y:0,z:0,yaw:0,v:0,vy:0,steer:0,roll:0,pitch:0,gF:null,gR:null,wall:Infinity,wallDir:1,placed:false,lx:0,ly:0,lz:0};
+}
+function carGround(x,z,y){const h=hits(x,z,y+1.2,4);return h.length?h[0].point.y:null}
+function wallDist(x,y,z,dx,dz,len){
+  const x1=x+dx*len,z1=z+dz*len,a=Math.min(x,x1)-.3,b=Math.max(x,x1)+.3,c=Math.min(z,z1)-.3,e=Math.max(z,z1)+.3;
+  const l=meshes.filter(m=>{const q=m.userData.b;return q.max.x>=a&&q.min.x<=b&&q.max.z>=c&&q.min.z<=e&&q.max.y>=y-.2&&q.min.y<=y+1});
+  if(!l.length)return Infinity;
+  og.set(x,y,z);hv.set(dx,0,dz);rc.set(og,hv);rc.far=len;
+  for(const q of rc.intersectObjects(l,false)){
+    if(q.face){hn.copy(q.face.normal).transformDirection(q.object.matrixWorld);if(Math.abs(hn.y)>.6)continue}
+    return q.distance}
+  return Infinity;
+}
+function applyCar(c){c.obj.position.set(c.x,c.y,c.z);c.obj.rotation.y=c.yaw;c.tilt.rotation.x=-c.pitch;
+  c.wheels.forEach(w=>{w.spin.rotation.x=c.roll;if(w.front)w.steer.rotation.y=-c.steer})}
+function placeCar(c,bx,bz,by,yaw){
+  const others=Object.values(CARS).filter(o=>o!==c&&o.placed);let fx=bx,fz=bz,fg=null;
+  search:for(const r of [8,12,17,24])for(const a of [0,.5,-.5,1,-1,1.6,-1.6,2.4,-2.4,3.1]){
+    const x=bx+Math.sin(yaw+a)*r,z=bz+Math.cos(yaw+a)*r,g=carGround(x,z,by);
+    if(g===null||Math.abs(g-by)>.7)continue;
+    if(others.some(o=>Math.hypot(o.x-x,o.z-z)<7))continue;
+    let ok=true;for(let k=0;k<4;k++){const h=yaw+a+k*Math.PI/2;if(wallDist(x,g+.6,z,Math.sin(h),Math.cos(h),3.4)<3.2){ok=false;break}}
+    if(!ok)continue;fx=x;fz=z;fg=g;break search}
+  c.x=fx;c.z=fz;c.y=fg===null?by:fg;c.yaw=yaw;c.v=0;c.vy=0;c.steer=0;c.pitch=0;c.gF=c.gR=null;c.wall=Infinity;c.placed=true;c.lx=c.x;c.ly=c.y;c.lz=c.z;
+  c.obj.visible=true;applyCar(c);
+}
+function carLabels(){CARDEF.forEach(d=>{const b=$(d.btn);if(b)b.textContent=(drv&&drv===CARS[d.id])?'Exit':d.name})}
+function enterCar(c){
+  if(fly){fly=false;$('fly').textContent='Fly';$('vb').hidden=true;fv.set(0,0,0)}
+  drv=c;c.v=0;c.wall=Infinity;holder.visible=false;camPitch=.25;camYaw=c.yaw+Math.PI;camHold=0;carTick=0;hudT=0;carLabels();
+}
+function exitCar(){
+  const c=drv;if(!c)return;
+  const sd=c.yaw+Math.PI/2;let px=c.x+Math.sin(sd)*(c.hw+1.1),pz=c.z+Math.cos(sd)*(c.hw+1.1),g=carGround(px,pz,c.y+.5);
+  if(g===null||Math.abs(g-c.y)>1.2){px=c.x;pz=c.z;g=c.y}
+  pos.set(px,g,pz);gy=g;tgt=g;air=false;vyA=0;spd=0;face=c.yaw;holder.visible=true;c.v=0;drv=null;
+  $('st').textContent='Left: move · Right: look';carLabels();
+}
+function toggleCar(id){
+  const c=CARS[id];if(!c)return;
+  if(drv===c){exitCar();return}
+  if(drv)exitCar();
+  const by=fly?flyG:pos.y,d=Math.hypot(c.x-pos.x,c.z-pos.z);
+  if(!c.placed||d>45||Math.abs(c.y-by)>6)placeCar(c,pos.x,pos.z,by,face);
+  enterCar(c);
+}
+CARDEF.forEach(d=>{$(d.btn).onclick=()=>toggleCar(d.id)});
+function probeCar(c){
+  const s=Math.sin(c.yaw),co=Math.cos(c.yaw),h=c.wb*.5+.2,dv=c.v>=0?1:-1;
+  c.gF=carGround(c.x+s*h,c.z+co*h,c.y);c.gR=carGround(c.x-s*h,c.z-co*h,c.y);
+  c.wall=wallDist(c.x,c.y+.55,c.z,s*dv,co*dv,c.hl+Math.abs(c.v)*.22+.5);c.wallDir=dv;
+}
+function driveLoop(dt){
+  const c=drv,thr=clamp(sy*1.2,-1,1),st=clamp(sx*1.2,-1,1),v=c.v;
+  carTick-=dt;if(carTick<=0){carTick=.07;probeCar(c)}
+  // throttle / brake / reverse
+  let a=0;
+  if(thr>.08)a=v<-.6?c.brk*thr:c.acc*thr*(1-clamp(v/c.max,0,1));
+  else if(thr<-.08)a=v>.6?-c.brk*(-thr):c.acc*thr*.6*(1-clamp(-v/(c.max*.3),0,1));
+  else a=-Math.sign(v)*Math.min(Math.abs(v)/Math.max(dt,.001),3);
+  a-=Math.sign(v)*(.8+.0009*v*v);
+  let nv=v+a*dt;if(v!==0&&Math.sign(nv)!==Math.sign(v)&&Math.abs(thr)<.08)nv=0;
+  c.v=clamp(nv,-c.max*.3,c.max);
+  // steering (less at speed)
+  const ms=.6/(1+Math.abs(c.v)*.06);c.steer+=(st*ms-c.steer)*Math.min(1,dt*7);
+  const lim=20/Math.max(Math.abs(c.v),2);c.yaw-=clamp(c.v/c.wb*Math.tan(c.steer),-lim,lim)*dt;
+  // walls / steep steps stop the car
+  const dv=c.v>=0?1:-1;let hit=false;
+  if(c.wallDir===dv&&c.wall<c.hl+Math.abs(c.v)*dt*2+.25)hit=true;
+  const ga=dv>0?c.gF:c.gR;if(ga!==null&&ga-c.y>.8)hit=true;
+  if(hit&&Math.abs(c.v)>.2){c.v=-c.v*.2;if(Math.abs(c.v)<1.5)c.v=0;c.wall=Infinity}
+  else{c.x+=Math.sin(c.yaw)*c.v*dt;c.z+=Math.cos(c.yaw)*c.v*dt}
+  // ground following, ramps, drops
+  let g=null;if(c.gF!==null&&c.gR!==null)g=(c.gF+c.gR)/2;else if(c.gF!==null)g=c.gF;else if(c.gR!==null)g=c.gR;
+  if(g===null||c.y-g>.5){c.vy-=24*dt;c.y+=c.vy*dt;if(g!==null&&c.y<=g){c.y=g;c.vy=0}}
+  else{c.vy=0;c.y+=(g-c.y)*Math.min(1,dt*16)}
+  let tp=0;if(c.gF!==null&&c.gR!==null&&c.y-g<=.5)tp=clamp(Math.atan2(c.gF-c.gR,c.wb+.3),-.5,.5);
+  c.pitch+=(tp-c.pitch)*Math.min(1,dt*8);
+  if(g!==null&&c.y-g<.2){c.lx=c.x;c.ly=c.y;c.lz=c.z}
+  if(c.y<box.min.y-80){c.x=c.lx;c.y=c.ly;c.z=c.lz;c.vy=0;c.v=0}
+  c.roll+=c.v*dt/c.wr;applyCar(c);
+  pos.set(c.x,c.y,c.z);gy=c.y;face=c.yaw;spd=Math.abs(c.v);
+  // chase camera (drag on the right side to look around; it swings back behind the car when you let go)
+  if(lid!==null)camHold=2;else camHold-=dt;
+  if(camHold<=0){let d=c.yaw+Math.PI-camYaw;d=Math.atan2(Math.sin(d),Math.cos(d));camYaw+=d*Math.min(1,dt*2.5)}
+  const cp=Math.cos(camPitch),dist=7.5+Math.abs(c.v)*.05,fo=1.4;
+  cam.position.set(pos.x+Math.sin(camYaw)*cp*dist,Math.max(pos.y+.8,pos.y+fo+Math.sin(camPitch)*dist),pos.z+Math.cos(camYaw)*cp*dist);
+  cam.lookAt(pos.x,pos.y+fo,pos.z);
+  hudT-=dt;if(hudT<=0){hudT=.25;$('st').textContent=Math.round(Math.abs(c.v)*3.6)+' km/h · Left: gas + steer · Right: look'}
+  npcUpdate(dt);env(dt);R.render(S,cam);
+}
+async function loadCars(){
+  try{carEnvTex=carEnvMap()}catch(e){carEnvTex=null}
+  for(const d of CARDEF){
+    try{
+      const g=await parseP(await fetchBuf([d.file])),car=makeCar(d,g.scene);
+      S.add(car.obj);CARS[d.id]=car;
+      if(!drv&&!fly&&!air)placeCar(car,pos.x,pos.z,pos.y,face);
+      $(d.btn).hidden=false;
+    }catch(e){console.warn('car not loaded',d.file,e)}
+    await new Promise(r=>setTimeout(r,200));
+  }
 }
 start();
 </script></body></html>
