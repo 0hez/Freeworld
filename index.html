@@ -108,22 +108,23 @@ async function start(){
       prep(o,nm.startsWith('uppr')?'body':nm.startsWith('lowr')?'hand':nm.startsWith('hair')?'hair':'head');
       if(o.userData.type!=='head')parts.push(o)});
     holder.add(rig);S.add(holder);
-    const W=await (await fetch('world.json')).json(),TILE=100;let x0=0;
+    const W=await (await fetch('world.json')).json(),SC=10;let x0=0;
     for(const m of W.maps){
       $('msg').textContent='Loading '+m.name+'…';
       const root=(await parseP(await fetchBuf(m.parts))).scene;root.updateMatrixWorld(true);
-      const b=new THREE.Box3().setFromObject(root),s=TILE/(b.max.x-b.min.x),wr=new THREE.Group();
-      wr.add(root);wr.scale.setScalar(s);wr.position.set(x0-b.min.x*s,-(m.floor!==undefined?m.floor:b.min.y)*s,-(b.min.z+b.max.z)/2*s);
-      S.add(wr);wr.updateMatrixWorld(true);x0+=TILE;
-      wr.traverse(o=>{if(o.isMesh){(Array.isArray(o.material)?o.material:[o.material]).forEach(q=>{if(q&&q.metalness>.3)q.metalness=.1});o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
+      const cr=m.crop,wr=new THREE.Group();
+      root.traverse(o=>{if(o.isMesh){const q=new THREE.Box3().setFromObject(o),c=(q.min.x+q.max.x)/2;if(c<cr[0]||c>cr[1])o.visible=false}});
+      wr.add(root);wr.scale.setScalar(SC);wr.position.set(x0-cr[0]*SC,-m.floor*SC,(m.dz||0)*SC);
+      S.add(wr);wr.updateMatrixWorld(true);x0+=(cr[1]-cr[0])*SC;
+      wr.traverse(o=>{if(o.isMesh&&o.visible){(Array.isArray(o.material)?o.material:[o.material]).forEach(q=>{if(q&&q.metalness>.3)q.metalness=.1});o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
     }
     box=new THREE.Box3();meshes.forEach(o=>box.union(o.userData.b));
-    ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=TILE*.0045;
+    ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=SC*.18;
     S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);cam.near=H*.1;cam.far=ext*4;cam.updateProjectionMatrix();
-    const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshLambertMaterial({color:0x5d6470}));
-    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-.03,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
-    pl.userData.b=new THREE.Box3().setFromObject(pl);meshes.push(pl);
-    setSize();spawn();$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
+    const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshBasicMaterial({color:0x23272d}));
+    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-.05,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
+    pl.userData.b=new THREE.Box3().setFromObject(pl);
+    setSize();spawn();meshes.push(pl);$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
   }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
 }
 // ---- input ----

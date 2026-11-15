@@ -6,7 +6,24 @@
     "asian_p1.bin",
     "asian_p2.bin"
    ],
-   "floor": 0.0314
+   "floor": 0.0314,
+   "crop": [
+    -13.9,
+    4.5
+   ],
+   "dz": 0
+  },
+  {
+   "name": "Cyberpunk city",
+   "parts": [
+    "cyber_p1.bin"
+   ],
+   "floor": 0.0622,
+   "crop": [
+    -12.8,
+    17.2
+   ],
+   "dz": 0
   },
   {
    "name": "Hong Kong",
@@ -15,14 +32,12 @@
     "hongkong_p2.bin",
     "hongkong_p3.bin"
    ],
-   "floor": -0.0049
-  },
-  {
-   "name": "Cyberpunk city",
-   "parts": [
-    "cyber_p1.bin"
+   "floor": -0.0049,
+   "crop": [
+    -10.6,
+    9.0
    ],
-   "floor": 0.0622
+   "dz": 6
   }
  ]
 }
