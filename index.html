@@ -126,7 +126,7 @@ async function start(){
     ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=SC*.18;
     S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);cam.near=H*.25;cam.far=ext*4;cam.updateProjectionMatrix();
     const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshBasicMaterial({color:0x23272d}));
-    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-.15,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
+    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-1.5,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
     pl.userData.b=new THREE.Box3().setFromObject(pl);
     setSize();spawn();meshes.push(pl);$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
   }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
