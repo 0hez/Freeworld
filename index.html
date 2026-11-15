@@ -184,8 +184,8 @@ function buildEnv(){
   S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);
   const cx=(box.min.x+box.max.x)/2,cz=(box.min.z+box.max.z)/2,hx=(box.max.x-box.min.x)/2,hz=(box.max.z-box.min.z)/2;
   // original dark floor under everything (unchanged)
-  const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshLambertMaterial({color:new THREE.Color(.33,.4,.28),polygonOffset:true,polygonOffsetFactor:4,polygonOffsetUnits:8}));
-  pl.rotation.x=-Math.PI/2;pl.position.set(cx,-.3,cz);S.add(pl);pl.updateMatrixWorld(true);pl.userData.b=new THREE.Box3().setFromObject(pl);PLN=pl;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshBasicMaterial({color:0x23272d}));
+  pl.rotation.x=-Math.PI/2;pl.position.set(cx,-1.5,cz);S.add(pl);pl.updateMatrixWorld(true);pl.userData.b=new THREE.Box3().setFromObject(pl);PLN=pl;
   buildGaps();
   // clouds
   const tx=[cloudTex(),cloudTex(),cloudTex()];cloudMats=tx.map(t=>new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,fog:false,opacity:.8}));
