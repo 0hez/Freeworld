@@ -5,7 +5,8 @@
    "parts": [
     "asian_p1.bin",
     "asian_p2.bin"
-   ]
+   ],
+   "floor": 0.0314
   },
   {
    "name": "Hong Kong",
@@ -13,13 +14,15 @@
     "hongkong_p1.bin",
     "hongkong_p2.bin",
     "hongkong_p3.bin"
-   ]
+   ],
+   "floor": -0.0049
   },
   {
    "name": "Cyberpunk city",
    "parts": [
     "cyber_p1.bin"
-   ]
+   ],
+   "floor": 0.0622
   }
  ]
 }

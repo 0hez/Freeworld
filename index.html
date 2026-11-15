@@ -10,6 +10,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .btn,button{background:var(--ac);color:#fff;border:0;border-radius:12px;padding:12px 18px;font:600 15px system-ui;display:inline-block}
 #bar{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);right:10px;display:flex;gap:8px}
 #bar button{background:var(--pn);color:var(--fg);padding:10px 14px}
+#vb{position:fixed;right:12px;top:42%;display:flex;flex-direction:column;gap:10px}#vb button{background:var(--pn);color:var(--fg);padding:16px 20px;font-size:20px}
 #st{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.7}
 #sb{position:fixed;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;background:var(--pn);display:none;pointer-events:none}
 #kn{position:absolute;left:40px;top:40px;width:40px;height:40px;border-radius:50%;background:var(--ac)}
@@ -17,8 +18,8 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 <canvas id="c"></canvas>
 <div id="ld"><div><h2>City Walk</h2><p id="msg">Loading character…</p>
 </div></div>
-<div id="bar" hidden><button id="run">Walk</button><button id="sm">−</button><button id="bg">+</button></div>
-<div id="sb"><div id="kn"></div></div><div id="st" hidden>Left: move · Right: look</div>
+<div id="bar" hidden><button id="fly">Fly</button><button id="run">Walk</button><button id="sm">−</button><button id="bg">+</button></div>
+<div id="vb" hidden><button id="upb">▲</button><button id="dnb">▼</button></div><div id="sb"><div id="kn"></div></div><div id="st" hidden>Left: move · Right: look</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script>
@@ -112,13 +113,16 @@ async function start(){
       $('msg').textContent='Loading '+m.name+'…';
       const root=(await parseP(await fetchBuf(m.parts))).scene;root.updateMatrixWorld(true);
       const b=new THREE.Box3().setFromObject(root),s=TILE/(b.max.x-b.min.x),wr=new THREE.Group();
-      wr.add(root);wr.scale.setScalar(s);wr.position.set(x0-b.min.x*s,-b.min.y*s,-(b.min.z+b.max.z)/2*s);
+      wr.add(root);wr.scale.setScalar(s);wr.position.set(x0-b.min.x*s,-(m.floor!==undefined?m.floor:b.min.y)*s,-(b.min.z+b.max.z)/2*s);
       S.add(wr);wr.updateMatrixWorld(true);x0+=TILE;
-      wr.traverse(o=>{if(o.isMesh){o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
+      wr.traverse(o=>{if(o.isMesh){(Array.isArray(o.material)?o.material:[o.material]).forEach(q=>{if(q&&q.metalness>.3)q.metalness=.1});o.userData.b=new THREE.Box3().setFromObject(o);meshes.push(o)}});
     }
     box=new THREE.Box3();meshes.forEach(o=>box.union(o.userData.b));
     ext=Math.max(box.max.x-box.min.x,box.max.z-box.min.z);H=TILE*.0045;
     S.fog=new THREE.Fog(0xa9c7e8,ext*.5,ext*2);cam.near=H*.1;cam.far=ext*4;cam.updateProjectionMatrix();
+    const pl=new THREE.Mesh(new THREE.PlaneGeometry(ext*8,ext*8),new THREE.MeshLambertMaterial({color:0x5d6470}));
+    pl.rotation.x=-Math.PI/2;pl.position.set((box.min.x+box.max.x)/2,-.03,(box.min.z+box.max.z)/2);S.add(pl);pl.updateMatrixWorld(true);
+    pl.userData.b=new THREE.Box3().setFromObject(pl);meshes.push(pl);
     setSize();spawn();$('ld').hidden=true;$('bar').hidden=false;$('st').hidden=false;last=performance.now();loop();
   }catch(e){$('msg').textContent='Problem: '+(e&&e.message||e)}
 }
@@ -139,42 +143,62 @@ addEventListener('pointerup',up);addEventListener('pointercancel',up);
 $('run').onclick=e=>{run=!run;e.target.textContent=run?'Run':'Walk'};
 $('sm').onclick=()=>{H/=1.25;setSize()};$('bg').onclick=()=>{H*=1.25;setSize()};
 
+// ---- fly buttons ----
+let fly=false,air=false,vyA=0,vUp=0,vDn=0,flyG=0,fv=new THREE.Vector3();
+const hold=(id,f)=>{const e=$(id);e.addEventListener('pointerdown',ev=>{ev.preventDefault();f(1)});['pointerup','pointerleave','pointercancel'].forEach(n=>e.addEventListener(n,()=>f(0)))};
+hold('upb',v=>vUp=v);hold('dnb',v=>vDn=v);
+$('fly').onclick=e=>{fly=!fly;e.target.textContent=fly?'Land':'Fly';$('vb').hidden=!fly;fv.set(0,0,0);if(!fly){air=true;vyA=0}};
+
 // ---- main loop ----
 let last=0;
 function loop(){
   requestAnimationFrame(loop);
   const now=performance.now(),dt=Math.min(.05,(now-last)/1000);last=now;
-  const mag=Math.min(1,Math.hypot(sx,sy));let tv=0;
-  if(mag>.1){
-    const fy=-Math.sin(camYaw),fz=-Math.cos(camYaw),rx=Math.cos(camYaw),rz=-Math.sin(camYaw);
-    dir.set(fy*sy+rx*sx,0,fz*sy+rz*sx).normalize();tv=(run?2.4:.85)*H*mag;
-    let d=Math.atan2(dir.x,dir.z)-face;d=Math.atan2(Math.sin(d),Math.cos(d));face+=d*Math.min(1,dt*10);
+  const mag=Math.min(1,Math.hypot(sx,sy)),sY=Math.sin(camYaw),cY=Math.cos(camYaw);let tv=0;
+  tickT-=dt;const tk=tickT<=0;if(tk)tickT=.06;
+  let v=0,rb=0,mb=0,lean=0,flyMove=0;
+  if(fly){
+    const ang=clamp(-(camPitch-.35)*1.1,-1.2,1.2),ca=Math.cos(ang),sp=(run?11:5)*H,m=mag>.1?mag:0;
+    const tx=(-sY*sy*ca+cY*sx)*m*sp,tz=(-cY*sy*ca-sY*sx)*m*sp,ty=(sy*Math.sin(ang)*m+vUp-vDn)*sp;
+    fv.x+=(tx-fv.x)*Math.min(1,dt*4);fv.y+=(ty-fv.y)*Math.min(1,dt*4);fv.z+=(tz-fv.z)*Math.min(1,dt*4);
+    pos.x+=fv.x*dt;pos.y+=fv.y*dt;pos.z+=fv.z*dt;
+    if(tk){const h=hits(pos.x,pos.z,pos.y+.5*H,pos.y+.5*H-box.min.y+2);flyG=h.length?h[0].point.y:box.min.y}
+    pos.y=Math.max(pos.y,flyG+.35*H);gy=pos.y;
+    const hs=Math.hypot(fv.x,fv.z);if(hs>.05*H){let d=Math.atan2(fv.x,fv.z)-face;d=Math.atan2(Math.sin(d),Math.cos(d));face+=d*Math.min(1,dt*8)}
+    flyMove=clamp(Math.hypot(fv.x,fv.y,fv.z)/(4*H),0,1);spd=0;
+    lean=.15+(clamp(1.3-ang*.9,.2,1.5)-.15)*flyMove;phase+=dt*(2+4*flyMove);
+  }else{
+    if(mag>.1){dir.set(-sY*sy+cY*sx,0,-cY*sy-sY*sx).normalize();tv=(run?2.4:.85)*H*mag;
+      let d=Math.atan2(dir.x,dir.z)-face;d=Math.atan2(Math.sin(d),Math.cos(d));face+=d*Math.min(1,dt*10)}
+    spd+=(tv-spd)*Math.min(1,dt*8);
+    if(air){
+      blocked=false;vyA-=14*H*dt;pos.y+=vyA*dt;gy=pos.y;
+      if(tk){const h=hits(pos.x,pos.z,pos.y+.5*H,pos.y+.5*H-box.min.y+2);tgt=h.length?h[0].point.y:box.min.y}
+      if(tgt!==null&&pos.y<=tgt){pos.y=tgt;gy=tgt;air=false;vyA=0}
+    }else if(tk){blocked=false;
+      if(spd>.05*H){const l=spd*.25+.3*H,nx=pos.x+dir.x*l,nz=pos.z+dir.z*l,g=groundAt(nx,nz);
+        if(g===null||g-pos.y>.4*H)blocked=true;else tgt=g}
+      else{const g=groundAt(pos.x,pos.z);if(g!==null)tgt=g}}
+    if(!blocked&&spd>.01){pos.x+=dir.x*spd*dt;pos.z+=dir.z*spd*dt}
+    if(!air){if(tgt!==null)gy+=(tgt-gy)*Math.min(1,dt*12);pos.y=gy}
+    v=blocked?0:spd/H;rb=clamp((v-.85)/1.5,0,1);mb=clamp(v/.3,0,1);
+    phase+=2*Math.PI*(v*H)/(H*(.9+.3*rb))*dt;lean=(.04+.14*rb)*mb;
   }
-  spd+=(tv-spd)*Math.min(1,dt*8);
-  // terrain probe ~16x/sec: step up limit + no walking off the map
-  tickT-=dt;
-  if(tickT<=0){tickT=.06;blocked=false;
-    if(spd>.05*H){const l=spd*.25+.3*H,nx=pos.x+dir.x*l,nz=pos.z+dir.z*l,g=groundAt(nx,nz);
-      if(g===null||g-pos.y>.4*H)blocked=true;else tgt=g}
-    else{const g=groundAt(pos.x,pos.z);if(g!==null)tgt=g}}
-  if(!blocked&&spd>.01){pos.x+=dir.x*spd*dt;pos.z+=dir.z*spd*dt}
-  if(tgt!==null)gy+=(tgt-gy)*Math.min(1,dt*12);pos.y=gy;
-  // gait
-  const v=blocked?0:spd/H,rb=clamp((v-.85)/1.5,0,1),mb=clamp(v/.3,0,1);
-  phase+=2*Math.PI*(v*H)/(H*(.9+.3*rb))*dt;
   const A=(.42+.5*rb)*mb,K=(.75+.5*rb)*mb,Aa=(.38+.7*rb)*mb,sn=Math.sin(phase),sn2=Math.sin(phase+Math.PI);
   const bend=ph=>Math.max(0,Math.cos(ph+.3));
-  const al=-Aa*sn,ar=-Aa*sn2;
-  const P={hl:A*sn,hr:A*sn2,kl:K*bend(phase),kr:K*bend(phase+Math.PI),al,ar,
+  let P;
+  if(fly){const fl=Math.sin(phase*2)*.12;
+    P={hl:-.3+fl,hr:-.45-fl,kl:.15+flyMove*.2,kr:.3,al:-.15,ar:-.15,el:.15,er:.15,ad:.55,sway:.1+.5*flyMove+.05*Math.sin(phase*3)};}
+  else{const al=-Aa*sn,ar=-Aa*sn2;
+    P={hl:A*sn,hr:A*sn2,kl:K*bend(phase),kr:K*bend(phase+Math.PI),al,ar,
     el:.22+.35*rb+.45*mb*Math.max(0,al/(Aa||1))*(.4+rb),er:.22+.35*rb+.45*mb*Math.max(0,ar/(Aa||1))*(.4+rb),
-    ad:.5-.18*mb,sway:(.05+.28*rb)*mb+.04*Math.sin(phase*2)*mb};
+    ad:.5-.18*mb,sway:(.05+.28*rb)*mb+.04*Math.sin(phase*2)*mb};}
   parts.forEach(m=>skin(m,P));
-  holder.position.set(pos.x,pos.y+Math.abs(Math.cos(phase))*.035*H*mb*(1+rb),pos.z);
-  holder.rotation.y=face;rig.rotation.x=(.04+.14*rb)*mb;
-  // camera
-  const dist=H*3.4,cp=Math.cos(camPitch);
-  cam.position.set(pos.x+Math.sin(camYaw)*cp*dist,Math.max(pos.y+H*.35,pos.y+H*.9+Math.sin(camPitch)*dist),pos.z+Math.cos(camYaw)*cp*dist);
-  cam.lookAt(pos.x,pos.y+H*.9,pos.z);
+  const bob=fly?Math.sin(phase)*.03*H:Math.abs(Math.cos(phase))*.035*H*mb*(1+rb);
+  holder.position.set(pos.x,pos.y+bob,pos.z);holder.rotation.y=face;rig.rotation.x=lean;
+  const dist=H*3.4,cp=Math.cos(camPitch),fo=fly?H*.5:H*.9;
+  cam.position.set(pos.x+Math.sin(camYaw)*cp*dist,Math.max(pos.y+H*.35,pos.y+fo+Math.sin(camPitch)*dist),pos.z+Math.cos(camYaw)*cp*dist);
+  cam.lookAt(pos.x,pos.y+fo,pos.z);
   R.render(S,cam);
 }
 start();
