@@ -1,0 +1,25 @@
+{
+ "maps": [
+  {
+   "name": "Asian city",
+   "parts": [
+    "asian_p1.bin",
+    "asian_p2.bin"
+   ]
+  },
+  {
+   "name": "Hong Kong",
+   "parts": [
+    "hongkong_p1.bin",
+    "hongkong_p2.bin",
+    "hongkong_p3.bin"
+   ]
+  },
+  {
+   "name": "Cyberpunk city",
+   "parts": [
+    "cyber_p1.bin"
+   ]
+  }
+ ]
+}
